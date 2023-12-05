@@ -1,0 +1,11 @@
+torch
+torchvision
+torchaudio
+pandas
+scikit-learn
+wfdb
+ipykernel
+ipython
+scipy
+tqdm
+h5py
