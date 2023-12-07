@@ -2,6 +2,7 @@ import torch
 from torch.utils.data import Dataset
 import h5py
 import numpy as np
+from tqdm import tqdm
 
 
 class HDF5Dataset(Dataset):
@@ -30,7 +31,7 @@ class HDF5Dataset(Dataset):
         self._hdf_handle = h5py.File(self.hdf5_path, "r")
         self._keys = []
 
-        for key in self._hdf_handle.keys():
+        for key in tqdm(self._hdf_handle.keys()):
             if self.reference_level is not None:
                 self._keys.append(key)
             else:
