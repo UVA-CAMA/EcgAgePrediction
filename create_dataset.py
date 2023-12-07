@@ -1,69 +1,91 @@
 #!/usr/bin/env python3
-import re
+import json
 import h5py
-import wfdb
-
 from pathlib import Path
 import pandas as pd
-from scipy.signal import resample
-from sklearn.model_selection import train_test_split
 from tqdm import tqdm
+from ecgdl.readers import WFDBReader
 
 import argparse
 
-def ingest_wfdb(p, leads = ["I", "II", "III"], fs = 500):
-    record = wfdb.rdrecord(p.with_suffix(""))
-    lead_idxs = [record.sig_name.index(x) for x in leads]
-
-    dat = record.p_signal[:, lead_idxs]
-
-    if any(dat.std(axis=0) == 0):
-        return None
-    
-    if record.fs != fs:
-        new_len = int(dat.shape[0] * fs / record.fs)
-        dat = resample(dat, new_len, axis = 0)
-
-    dat = (dat - dat.mean(axis=0)) / dat.std(axis=0)
-
-    return dat
-
-def lookup_gender(x):
-    if all_records[all_records['file_name'] == int(x)].iloc[0].gender == 'M':
-        return 1
-    return 0
-
-def lookup_age(x):
-    return all_records[all_records['file_name'] == int(x)].iloc[0].ecg_age
-
-def create_dataset(input_files, output_file, leads, fs = 500):
-    with h5py.File(output_file, "w") as fh:
-        fh.attrs["fs"] = fs
-        fh.attrs["leads"] = leads
-        for file in tqdm(input_files):
-            dat = ingest_wfdb(file, leads, fs)
-            if dat is None:
-                continue
-            group = fh.create_group(file.stem)
-            group.create_dataset("ecg", data=dat)
-            group.create_dataset("gender", data=lookup_gender(file.stem))
-            group.create_dataset("age", data=lookup_age(file.stem))
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--ecg_path', type=str, required=True)
-parser.add_argument('--file', type=str, required=True)
-parser.add_argument('--output', type=str, required=True)
-parser.add_argument('--head', type=int)
-parser.add_argument('--fs', type=int, default=500)
-parser.add_argument('--leads', type=str, nargs="+", required=True)
+parser.add_argument(
+    "--skip-missing",
+    action="store_true",
+    help="Skip missing files instead of raising an error",
+)
+parser.add_argument("--head", type=int, help="Only process the first N files")
+parser.add_argument("--annotations", type=str, help="Path to annotations file")
+parser.add_argument("--ecg-path", type=str, help="Path to ECG files")
+parser.add_argument("--show-errors", action="store_true", help="Show errors")
+parser.add_argument("specfile", type=str, help="Path to specfile")
+parser.add_argument("record_file", type=str, help="Path to record file")
+parser.add_argument("output_file", type=str, help="Path to output file")
 args = parser.parse_args()
 
-ECG_PATH = Path(args.ecg_path)
+if args.ecg_path is not None:
+    ECG_PATH = Path(args.ecg_path)
+else:
+    ECG_PATH = Path("/")
 
-all_records = pd.read_csv(args.file)
-all_files = [ECG_PATH / Path(x) for x in all_records['path']]
+if args.annotations is not None:
+    annotations = pd.read_csv(args.annotations).set_index("study_id")
+else:
+    annotations = None
 
-if not args.head is None:
-    all_files = all_files[:args.head]
+specfile = json.load(open(args.specfile, "r"))
 
-create_dataset(all_files, args.output, args.leads, fs=args.fs)
+with open(args.record_file, "r") as f:
+    all_records = [x.strip() for x in f.readlines()]
+
+record_count = 0
+error_count = 0
+with h5py.File(args.output_file, "w") as fh:
+    for key in specfile:
+        fh.attrs[key] = specfile[key]
+
+    if annotations is not None:
+        fh.attrs["annotations"] = list(annotations.columns)
+
+    for record in tqdm(all_records):
+        record_path = ECG_PATH / record
+        if not record_path.with_suffix(".hea").exists():
+            if args.skip_missing:
+                continue
+            else:
+                raise RuntimeError(f"Record {record_path} does not exist")
+
+        reader = WFDBReader(
+            record_path,
+            leads = specfile.get("leads"),
+            fs = specfile.get("fs"),
+            sig_len = specfile.get("sig_len"),
+            remove_baseline=specfile.get("remove_baseline", True),
+            remove_powerline=specfile.get("remove_powerline", True),
+            require_nonzero_std=specfile.get("require_nonzero_std", True),
+            require_no_nan=specfile.get("require_no_nan", True)
+        )
+
+        dat, error = reader.read()
+
+        if dat is None:
+            error_count += 1
+            if args.show_errors:
+                print(f"Record {record_path} skipped for reason: {error}")
+            continue
+
+        group = fh.create_group(record_path.stem)
+        group.create_dataset("ecg", data=dat)
+
+        if annotations is not None:
+            record = annotations[annotations.index == int(record_path.stem)].iloc[0]
+            for key in record.keys():
+                group.attrs[key] = record[key]
+
+        record_count += 1
+        if args.head is not None and record_count > args.head:
+            break
+
+
+print(f"Imported {record_count} records with {error_count} errors")
