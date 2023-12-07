@@ -1,23 +1,32 @@
 #!/usr/bin/env bash
 
-sbatch create_dataset.slurm \
-    --ecg_path /scratch/ajb5d/ecg/mimic-iv-ecg-diagnostic-electrocardiogram-matched-subset-1.0 \
-    --file data/mimic/test_ecgs.csv \
-    --output /scratch/ajb5d/ecgdl/data/mimic/test_ecgs_II.h5 \
-    --leads II \
-    --fs 250
+COHORT_NAME=$(basename -s .json "$1")
+
+echo "Building for $COHORT_NAME"
 
 sbatch create_dataset.slurm \
-    --ecg_path /scratch/ajb5d/ecg/mimic-iv-ecg-diagnostic-electrocardiogram-matched-subset-1.0 \
-    --file data/mimic/train_ecgs.csv \
-    --output /scratch/ajb5d/ecgdl/data/mimic/train_ecgs_II.h5 \
-    --leads II \
-    --fs 250
+    --annotations data/mimic/derived_ecg_annotations.csv \
+    --show-errors \
+    --ecg-path /scratch/ajb5d/ecg/mimic-iv-ecg-diagnostic-electrocardiogram-matched-subset-1.0 \
+    "$1" \
+    data/mimic/RECORDS_train.txt \
+    /scratch/ajb5d/ecgdl/data/mimic/"$COHORT_NAME"_train.h5
 
 sbatch create_dataset.slurm \
-    --ecg_path /scratch/ajb5d/ecg/mimic-iv-ecg-diagnostic-electrocardiogram-matched-subset-1.0 \
-    --file data/mimic/val_ecgs.csv \
-    --output /scratch/ajb5d/ecgdl/data/mimic/val_ecgs_II.h5 \
-    --leads II \
-    --fs 250
+    --annotations data/mimic/derived_ecg_annotations.csv \
+    --show-errors \
+    --ecg-path /scratch/ajb5d/ecg/mimic-iv-ecg-diagnostic-electrocardiogram-matched-subset-1.0 \
+    "$1" \
+    data/mimic/RECORDS_test.txt \
+    /scratch/ajb5d/ecgdl/data/mimic/"$COHORT_NAME"_test.h5
+
+sbatch create_dataset.slurm \
+    --annotations data/mimic/derived_ecg_annotations.csv \
+    --show-errors \
+    --ecg-path /scratch/ajb5d/ecg/mimic-iv-ecg-diagnostic-electrocardiogram-matched-subset-1.0 \
+    "$1" \
+    data/mimic/RECORDS_val.txt \
+    /scratch/ajb5d/ecgdl/data/mimic/"$COHORT_NAME"_val.h5
+
+
 
