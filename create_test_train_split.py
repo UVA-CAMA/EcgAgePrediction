@@ -24,6 +24,10 @@ sets = {
     'test': test_patients
 }
 
+ecg_data[['study_id', 'gender', 'ecg_age']].to_csv(
+    BASE_DATA_PATH / "mimic" / "derived_ecg_annotations.csv", index=False)
+
 for s in sets:
-    ecg_data[ecg_data['subject_id'].isin(sets[s])].to_csv(
-        BASE_DATA_PATH / "mimic" / f'{s}_ecgs.csv', index=False)
+    with open(BASE_DATA_PATH / "mimic" / f"RECORDS_{s}.txt", 'w') as f:
+        for x in ecg_data[ecg_data['subject_id'].isin(sets[s])]['path']:
+            f.write(f"{x}\n")

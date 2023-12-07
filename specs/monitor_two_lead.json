@@ -1,0 +1,8 @@
+{
+    "fs": 240,
+    "sig_len": 2048,
+    "leads": ["II", "III"],
+    "remove_powerline": true,
+    "remove_baseline": true,
+    "center_and_scale": true
+}
