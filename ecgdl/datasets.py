@@ -6,7 +6,7 @@ from tqdm import tqdm
 
 
 class HDF5Dataset(Dataset):
-    def __init__(self, hdf5_path: str, output_key=None, reference_level=None):
+    def __init__(self, hdf5_path:str, output_key:str=None, reference_level:str=None, limit:int=None):
         """
         Create a dataset from an HDF5 file.
 
@@ -22,6 +22,9 @@ class HDF5Dataset(Dataset):
             If specified, the output label will be 1.0 if the value of output_key
             matches this value, and 0.0 otherwise. If None, the value of output_key
             will be returned as-is.
+
+        limit : int, optional
+            if specified, use only the first limit data points (for testing)
         """
 
         self.hdf5_path = hdf5_path
@@ -37,6 +40,10 @@ class HDF5Dataset(Dataset):
             else:
                 if not np.isnan(self._hdf_handle[key].attrs[self.output_key]):
                     self._keys.append(key)
+
+            if limit:
+                if len(self._keys) >= limit:
+                    break
 
     def __len__(self):
         return len(self._keys)
