@@ -10,4 +10,4 @@ scipy
 tqdm
 h5py
 torchinfo
-
+pytorch-ignite
