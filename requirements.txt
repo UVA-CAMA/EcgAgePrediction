@@ -9,3 +9,5 @@ ipython
 scipy
 tqdm
 h5py
+torchinfo
+
