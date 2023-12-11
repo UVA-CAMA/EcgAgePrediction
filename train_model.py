@@ -14,6 +14,7 @@ from ignite.contrib.handlers import global_step_from_engine
 from ignite.contrib.metrics import ROC_AUC
 
 from pathlib import Path
+import argparse
 
 from ecgdl.models.mayo import MayoModel
 
@@ -27,20 +28,29 @@ device = (
 
 print(f"Using {device} device")
 
+parser = argparse.ArgumentParser()
+parser.add_argument("--limit", type=int, help="Only process the first N files")
+parser.add_argument("target", type=str, choices=["diagnostic_12_lead", "diagnostic_two_lead", "monitor_12_lead", "monitor_two_lead"])
+args = parser.parse_args()
+
 DATA_PATH = Path("/scratch/ajb5d/ecgdl/data/mimic/")
 MODEL_PATH = Path("/scratch/ajb5d/ecgdl/models/mimic/")
 TASK = "gender"
 ARCH = "cnn"
-DATA_TARGET = "diagnostic_12_lead"
+DATA_TARGET = args.target
 
-train_dataset = HDF5Dataset(DATA_PATH / f"{DATA_TARGET}_train.h5", 'gender', 'M')
-val_dataset = HDF5Dataset(DATA_PATH / f"{DATA_TARGET}_val.h5", 'gender', 'M')
+train_dataset = HDF5Dataset(DATA_PATH / f"{DATA_TARGET}_train.h5", 'gender', 'M',  limit=args.limit)
+val_dataset = HDF5Dataset(DATA_PATH / f"{DATA_TARGET}_val.h5", 'gender', 'M', limit=args.limit)
 
 train_dataloader = DataLoader(train_dataset, batch_size=128, shuffle=True, num_workers=2)
 val_dataloader = DataLoader(val_dataset, batch_size=256, shuffle=False, num_workers=2)
 
-model = MayoModel(12, 4096, 5120, 1).to(device)
-torchinfo.summary(model, input_size=(128, 12, 4096))
+CHANNELS = train_dataset[0][0].shape[0]
+SAMPLES = train_dataset[0][0].shape[1]
+(CHANNELS, SAMPLES)
+
+model = MayoModel(CHANNELS, SAMPLES, 5120, 1).to(device)
+torchinfo.summary(model, input_size=(128, CHANNELS, SAMPLES))
 
 learning_rate = 1e-3
 batch_size = 64
@@ -70,8 +80,7 @@ val_metrics = {
 train_evaluator = create_supervised_evaluator(model, metrics=val_metrics, device=device)
 val_evaluator = create_supervised_evaluator(model, metrics=val_metrics, device=device)
 
-log_interval = 50
-
+log_interval = 500
 @trainer.on(Events.ITERATION_COMPLETED(every=log_interval))
 def log_training_loss(engine):
     print(f"Epoch[{engine.state.epoch}], Iter[{engine.state.iteration}] Loss: {engine.state.output:.2f}")
@@ -90,7 +99,7 @@ def log_validation_results(trainer):
     print(f"Validation Results - Epoch[{trainer.state.epoch}]")
     print(metrics)
     
-model_checkpoint = ModelCheckpoint(save_path, 'myprefix', n_saved=2, create_dir=True, require_empty=False)
+model_checkpoint = ModelCheckpoint(save_path, 'checkpoint', n_saved=2, create_dir=True, require_empty=False)
 val_evaluator.add_event_handler(Events.COMPLETED, model_checkpoint, {"model": model})
 
 scheduler = ReduceLROnPlateauScheduler(optimizer, metric_name="loss", patience=5, trainer=trainer)

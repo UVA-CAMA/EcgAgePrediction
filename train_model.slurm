@@ -9,4 +9,4 @@
 #SBATCH --gres=gpu:1 
 
 source env/bin/activate
-./train_model.py
+./train_model.py $@
