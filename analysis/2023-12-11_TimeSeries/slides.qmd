@@ -1,0 +1,170 @@
+---
+title: "ECG Age Prediction WIP"
+author: "Andrew Barros"
+format: revealjs
+---
+
+```{r}
+#|message: false
+library(tidyverse)
+library(ggpubr)
+library(glue)
+library(ggrepel)
+
+diag_12 <- read_csv(
+  "../../data/scores_cnn_age_diagnostic_12_lead.csv",
+  guess_max = 1e6,
+  show_col_types = FALSE)
+
+diag_2 <- read_csv(
+  "../../data/scores_cnn_age_diagnostic_two_lead.csv",
+  guess_max = 1e6,
+  show_col_types = FALSE)  
+
+monitor_12 <- read_csv(
+  "../../data/scores_cnn_age_monitor_12_lead.csv",
+  guess_max = 1e6,
+  show_col_types = FALSE)
+
+monitor_2 <- read_csv(
+  "../../data/scores_cnn_age_monitor_two_lead.csv",
+  guess_max = 1e6,
+  show_col_types = FALSE)  
+
+big_df <- 
+  list(
+  "12-Leads, 500hz" = diag_12,
+  "12-Leads, 240hz" = monitor_12,
+  "2-Leads, 500hz" = diag_2,
+  "2-Leads, 240hz" = diag_2
+) %>%
+  list_rbind(names_to = "model") %>%
+  filter(y < 90)
+
+mae <- 
+  big_df %>%
+  group_by(model) %>%
+  summarize(mae = mean(abs(y - y_pred))) %>%
+  mutate(mae_label = glue("MAE: {format(mae, digits = 3)}"))
+```
+
+## How did we do?
+
+```{r}
+ggplot(big_df, aes(y, y_pred)) +
+  geom_hex() +
+  geom_smooth(method="gam", formula = y ~ x, color = "red") + 
+  stat_cor(color = "red") +
+  geom_label(aes(x=75, y=18, label=mae_label), data = mae) + 
+  facet_wrap(~model) + 
+  theme_bw(base_size = 14) + 
+  labs(x = "Age", y = "Predicted Age", color = "Count")
+```
+
+## 12-Leads, 500hz
+
+```{r}
+big_df %>%
+  filter(model == "12-Leads, 500hz") %>%
+  ggplot(aes(y, y_pred)) +
+    geom_hex() +
+    geom_smooth(method="gam", formula = y ~ x, color = "red") + 
+    geom_label(aes(x=75, y=18, label=mae_label),
+              data = mae %>% filter(model == "12-Leads, 500hz")) + 
+    stat_cor(color = "red") +
+    theme_bw(base_size = 14) +
+    labs(y = "ECG Predicted Age", x = "Age", fill = "Count")
+    
+```
+
+
+## Error Distributions
+
+```{r}
+big_df %>%
+  mutate(age_group = cut_number(y, n = 10),
+         err = y_pred - y) %>%
+  ggplot(aes(err)) + 
+    geom_density() + 
+    facet_wrap(~model) + 
+    theme_bw(base_size = 14) +
+    labs(x = "Error", y = "Density")
+```
+
+## Error Distributions
+
+```{r}
+big_df %>%
+  mutate(age_group = cut_number(y, n = 6),
+         err = y_pred - y) %>%
+  ggplot(aes(err, fill = age_group)) + 
+    geom_density(alpha = 0.4) + 
+    facet_wrap(~model) + 
+    theme_bw(base_size = 14) +
+    labs(x = "Error", y = "Density")
+```
+
+## ECG Features
+
+```{r}
+diag_12 %>% 
+  filter(y == 70) %>%
+  select(y_pred, rr_interval:t_axis) %>%
+  mutate(p_duration = p_end - p_onset,
+         pr_interval = qrs_onset - p_onset,
+         qrs_duration = qrs_end - qrs_onset,
+         qt_interval = t_end - qrs_onset) %>%
+  select(y_pred, ends_with("interval"), ends_with("duration"), ends_with("axis")) %>%
+  pivot_longer(-y_pred) %>%
+  filter(value < 10000, value > 0, if_else(str_ends(name, "axis"), value < 500, TRUE)) %>%
+  ggplot(aes(y_pred, value)) +
+    geom_point(size = 0.1) +
+    geom_smooth(method = "lm", formula = y ~ x) +
+    stat_cor() + 
+    facet_wrap(~name, scales = "free") +
+    theme_bw(base_size = 14) +
+    labs(x = "Predicted Age", y = "ECG Measure")
+```
+
+
+```{r}
+highlight_df <- diag_12 %>% 
+  filter(y == 70) %>%
+  filter(between(y_pred, 80, 81) | between(y_pred, 50, 51)) %>%
+  select(records) %>%
+  mutate(highlight = glue("{records}"))
+
+embed_df <- diag_12 %>% 
+  filter(y == 70) %>%
+  mutate(p_duration = p_end - p_onset,
+         pr_interval = qrs_onset - p_onset,
+         qrs_duration = qrs_end - qrs_onset,
+         qt_interval = t_end - qrs_onset) %>%
+    select(records, y_pred, ends_with("interval"),
+           ends_with("duration"), ends_with("axis")) %>%
+  filter(if_all(rr_interval:qrs_duration, ~ between(.x, 0, 10000)),
+         if_all(ends_with("axis"), ~ between(.x, -1, 361)))
+
+pca <- embed_df %>%
+  select(-records, -y_pred) %>%
+  prcomp(scale. = TRUE, rank = 2)
+
+embed <- as_tibble(pca$x)
+embed$y_pred = embed_df$y_pred
+embed$records = embed_df$records
+
+embed <- embed %>% left_join(highlight_df, by = "records")
+
+ggplot(embed, aes(PC1, PC2, color = y_pred)) +
+  geom_point() + 
+  geom_label_repel(aes(label = highlight), min.segment.length = 0) + 
+  scale_color_gradient2(low = "red", mid = "grey", high = "blue", midpoint = 70, ) + 
+  theme_bw(base_size = 14)
+```
+
+## 46214293 (Pred = 80)
+![46214293](46214293.png)
+
+## 45259164 (Pred = 50)
+![45259164](45259164.png)
+
