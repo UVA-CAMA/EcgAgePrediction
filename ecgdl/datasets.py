@@ -6,7 +6,7 @@ from tqdm import tqdm
 
 
 class HDF5Dataset(Dataset):
-    def __init__(self, hdf5_path:str, output_key:str=None, reference_level:str=None, limit:int=None):
+    def __init__(self, hdf5_path:str, output_key:str=None, reference_level:str=None, limit:int=None, filter_func=None):
         """
         Create a dataset from an HDF5 file.
 
@@ -30,6 +30,7 @@ class HDF5Dataset(Dataset):
         self.hdf5_path = hdf5_path
         self.output_key = output_key
         self.reference_level = reference_level
+        self.filter_func = filter_func
 
         self._hdf_handle = h5py.File(self.hdf5_path, "r")
         self._keys = []
@@ -38,9 +39,11 @@ class HDF5Dataset(Dataset):
             if self.reference_level is not None:
                 self._keys.append(key)
             else:
-                if not np.isnan(self._hdf_handle[key].attrs[self.output_key]):
-                    self._keys.append(key)
-
+                val = self._hdf_handle[key].attrs[self.output_key]
+                if not np.isnan(val):
+                    ## No filter or filter is true
+                    if not self.filter_func or self.filter_func(val):
+                        self._keys.append(key)
             if limit:
                 if len(self._keys) >= limit:
                     break

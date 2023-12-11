@@ -8,7 +8,7 @@ import numpy as np
 import torchinfo
 
 from ignite.engine import Engine, Events, create_supervised_trainer, create_supervised_evaluator
-from ignite.metrics import Accuracy, Loss
+from ignite.metrics import Accuracy, Loss, MeanAbsoluteError
 from ignite.handlers import ModelCheckpoint, TerminateOnNan, ReduceLROnPlateauScheduler
 from ignite.contrib.handlers import global_step_from_engine
 from ignite.contrib.metrics import ROC_AUC
@@ -30,17 +30,29 @@ print(f"Using {device} device")
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--limit", type=int, help="Only process the first N files")
+parser.add_argument("task", type=str, choices=["age", "gender"])
 parser.add_argument("target", type=str, choices=["diagnostic_12_lead", "diagnostic_two_lead", "monitor_12_lead", "monitor_two_lead"])
 args = parser.parse_args()
 
 DATA_PATH = Path("/scratch/ajb5d/ecgdl/data/mimic/")
 MODEL_PATH = Path("/scratch/ajb5d/ecgdl/models/mimic/")
-TASK = "gender"
+TASK = args.task
 ARCH = "cnn"
 DATA_TARGET = args.target
 
-train_dataset = HDF5Dataset(DATA_PATH / f"{DATA_TARGET}_train.h5", 'gender', 'M',  limit=args.limit)
-val_dataset = HDF5Dataset(DATA_PATH / f"{DATA_TARGET}_val.h5", 'gender', 'M', limit=args.limit)
+if args.task == "gender":
+    train_dataset = HDF5Dataset(DATA_PATH / f"{DATA_TARGET}_train.h5", 'gender', 'M',  limit=args.limit)
+    val_dataset = HDF5Dataset(DATA_PATH / f"{DATA_TARGET}_val.h5", 'gender', 'M', limit=args.limit)
+
+if args.task == "age":
+    train_dataset = HDF5Dataset(DATA_PATH / f"{DATA_TARGET}_train.h5",
+        'ecg_age',
+        limit=args.limit,
+        filter_func=lambda x: x < 90)
+    val_dataset = HDF5Dataset(DATA_PATH / f"{DATA_TARGET}_val.h5",
+        'ecg_age',
+        limit=args.limit,
+        filter_func=lambda x: x < 90)
 
 train_dataloader = DataLoader(train_dataset, batch_size=128, shuffle=True, num_workers=2)
 val_dataloader = DataLoader(val_dataset, batch_size=256, shuffle=False, num_workers=2)
@@ -56,9 +68,26 @@ learning_rate = 1e-3
 batch_size = 64
 epochs = 5
 
-criterion = nn.BCEWithLogitsLoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+def output_transform_logit(output):
+    y_pred, y = output
+    y_pred = torch.sigmoid(y_pred)
+    return y_pred, y
 
+if args.task == "gender":
+    criterion = nn.BCEWithLogitsLoss()
+    val_metrics = {
+        "loss": Loss(criterion),    
+        "auc": ROC_AUC(output_transform_logit),
+    }
+
+if args.task == "age":
+    criterion = nn.MSELoss()
+    val_metrics = {
+        "loss": Loss(criterion),    
+        "mae": MeanAbsoluteError()
+    }
+
+optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
 save_path = MODEL_PATH / TASK / f"{ARCH}_{DATA_TARGET}"
 print(f"Saving model to {save_path}")
@@ -66,16 +95,6 @@ if not save_path.exists():
     save_path.parent.mkdir(parents=True, exist_ok=True)
 
 trainer = create_supervised_trainer(model, optimizer, criterion, device)
-
-def output_transform(output):
-    y_pred, y = output
-    y_pred = torch.sigmoid(y_pred)
-    return y_pred, y
-
-val_metrics = {
-    "loss": Loss(criterion),    
-    "auc": ROC_AUC(output_transform),
-}
 
 train_evaluator = create_supervised_evaluator(model, metrics=val_metrics, device=device)
 val_evaluator = create_supervised_evaluator(model, metrics=val_metrics, device=device)
