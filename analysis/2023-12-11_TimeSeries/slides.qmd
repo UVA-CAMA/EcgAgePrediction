@@ -126,6 +126,7 @@ diag_12 %>%
     labs(x = "Predicted Age", y = "ECG Measure")
 ```
 
+## PCA of ECG Features
 
 ```{r}
 highlight_df <- diag_12 %>% 
