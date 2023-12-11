@@ -36,7 +36,7 @@ class HDF5Dataset(Dataset):
         self._keys = []
 
         for key in tqdm(self._hdf_handle.keys()):
-            if self.reference_level is not None:
+            if self.reference_level is not None or self.output_key is None:
                 self._keys.append(key)
             else:
                 val = self._hdf_handle[key].attrs[self.output_key]
@@ -50,6 +50,9 @@ class HDF5Dataset(Dataset):
 
     def __len__(self):
         return len(self._keys)
+
+    def lookup(self, key):
+        return self._hdf_handle[key]
 
     def __getitem__(self, idx):
         record = self._hdf_handle[self._keys[idx]]
