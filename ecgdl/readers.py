@@ -10,11 +10,12 @@ class WFDBReader:
         leads: [str] = None,
         fs: int = None,
         sig_len: int = None,
-        center_and_scale: bool = True,
+        center_and_scale: str = "mean-std",
         remove_baseline: bool = True,
         remove_powerline: bool = True,
         require_nonzero_std: bool = True,
         require_no_nan: bool = True,
+        lowpass_filter: float = None,
     ) -> None:
 
         self.path = path
@@ -26,6 +27,7 @@ class WFDBReader:
         self.remove_powerline = remove_powerline
         self.require_nonzero_std = require_nonzero_std
         self.require_no_nan = require_no_nan
+        self.lowpass_filter = lowpass_filter
 
     def _filter_remove_baseline(self, fs):
         fc = 0.8  # [Hz], cutoff frequency
@@ -44,6 +46,12 @@ class WFDBReader:
         q = 30
         b, a = signal.iirnotch(60.0, q, fs)
         return b, a
+    
+    def _filter_lowpass(self, cutoff, fs):
+        nyq = 0.5 * fs
+        order = 5
+        normal_cutoff = cutoff / nyq
+        return signal.butter(order, normal_cutoff, btype="low", analog=False, output="sos")
 
     def read(self) -> np.ndarray:
         record = wfdb.rdrecord(self.path.with_suffix(""))
@@ -74,6 +82,10 @@ class WFDBReader:
             b, a = self._filter_remove_powerline(current_fs)
             dat = signal.filtfilt(b, a, dat, axis=0)
 
+        if self.lowpass_filter is not None:
+            sos = self._filter_lowpass(self.lowpass_filter, current_fs)
+            dat = signal.sosfilt(sos, dat, axis=0)
+
         if self.fs is not None and current_fs != self.fs:
             new_len = int(dat.shape[0] * self.fs / current_fs)
             dat = signal.resample(dat, new_len, axis=0)
@@ -86,7 +98,9 @@ class WFDBReader:
             else:
                 dat = dat[: self.sig_len, :]
 
-        if self.center_and_scale:
+        if self.center_and_scale == "mean_std" :
             dat = (dat - dat.mean(axis=0)) / dat.std(axis=0)
+        elif self.center_and_scale == "mean_median_abs":
+            dat = (dat - dat.mean(axis=0)) / np.median(np.abs(dat), axis=0)
 
         return dat, None

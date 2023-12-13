@@ -64,7 +64,8 @@ with h5py.File(args.output_file, "w") as fh:
             remove_baseline=specfile.get("remove_baseline", True),
             remove_powerline=specfile.get("remove_powerline", True),
             require_nonzero_std=specfile.get("require_nonzero_std", True),
-            require_no_nan=specfile.get("require_no_nan", True)
+            require_no_nan=specfile.get("require_no_nan", True),
+            lowpass_filter=specfile.get("lowpass_filter", None),
         )
 
         dat, error = reader.read()
