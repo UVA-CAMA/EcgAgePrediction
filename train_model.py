@@ -32,7 +32,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--limit", type=int, help="Only process the first N files")
 parser.add_argument("task", type=str, choices=["age", "gender"])
 parser.add_argument("target", type=str, choices=["diagnostic_12_lead", "diagnostic_two_lead",
-    "monitor_12_lead", "monitor_two_lead"])
+    "monitor_12_lead", "monitor_two_lead", "processed_12_lead"])
 args = parser.parse_args()
 
 DATA_PATH = Path("/scratch/ajb5d/ecgdl/data/mimic/")
