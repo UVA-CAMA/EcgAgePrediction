@@ -25,6 +25,11 @@ class HDF5Dataset(Dataset):
 
         limit : int, optional
             if specified, use only the first limit data points (for testing)
+
+        filter_func : callable, optional
+            If specified, only use data points where filter_func(label) is true.
+
+        
         """
 
         self.hdf5_path = hdf5_path
