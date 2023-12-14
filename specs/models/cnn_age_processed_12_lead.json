@@ -1,0 +1,13 @@
+{
+    "task": "age",
+    "arch": "resnet",
+    "data": "processed_12_lead",
+    "data_opts": {
+        "transforms": [
+            "random_lead"
+        ]
+    },
+    "model": {
+        "pad": 2560
+    }
+}

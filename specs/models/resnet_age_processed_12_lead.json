@@ -1,0 +1,9 @@
+{
+    "task": "age",
+    "arch": "resnet",
+    "data": "processed_12_lead",
+    "model": {
+        "net_filter_sizes": [128, 196, 256, 320],
+        "net_sequence_lengths": [1024, 256, 64, 16]
+    }
+}

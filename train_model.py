@@ -8,15 +8,17 @@ import numpy as np
 import torchinfo
 
 from ignite.engine import Engine, Events, create_supervised_trainer, create_supervised_evaluator
-from ignite.metrics import Accuracy, Loss, MeanAbsoluteError
+from ignite.metrics import Accuracy, Loss, MeanAbsoluteError, RunningAverage
 from ignite.handlers import ModelCheckpoint, TerminateOnNan, ReduceLROnPlateauScheduler
-from ignite.contrib.handlers import global_step_from_engine
+from ignite.contrib.handlers.tqdm_logger import ProgressBar
 from ignite.contrib.metrics import ROC_AUC
 
 from pathlib import Path
 import argparse
+import json
 
 from ecgdl.models.mayo import MayoModel
+from ecgdl.models.resnet import ResNet1d
 
 device = (
     "cuda"
@@ -30,22 +32,32 @@ print(f"Using {device} device")
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--limit", type=int, help="Only process the first N files")
-parser.add_argument("task", type=str, choices=["age", "gender"])
-parser.add_argument("target", type=str, choices=["diagnostic_12_lead", "diagnostic_two_lead",
-    "monitor_12_lead", "monitor_two_lead", "processed_12_lead"])
+parser.add_argument("specfile", type=str)
 args = parser.parse_args()
+
+with open(args.specfile, "r") as f:
+    specfile = json.load(f)
 
 DATA_PATH = Path("/scratch/ajb5d/ecgdl/data/mimic/")
 MODEL_PATH = Path("/scratch/ajb5d/ecgdl/models/mimic/")
-TASK = args.task
-ARCH = "cnn"
-DATA_TARGET = args.target
+TASK = specfile.get("task")
+ARCH = specfile.get("arch")
+DATA_TARGET = specfile.get("data")
 
-if args.task == "gender":
-    train_dataset = HDF5Dataset(DATA_PATH / f"{DATA_TARGET}_train.h5", 'gender', 'M',  limit=args.limit)
-    val_dataset = HDF5Dataset(DATA_PATH / f"{DATA_TARGET}_val.h5", 'gender', 'M', limit=args.limit)
+assert(TASK in ['gender','age'])
+assert(ARCH in ['resnet','cnn'])
 
-if args.task == "age":
+if TASK == "gender":
+    train_dataset = HDF5Dataset(DATA_PATH / f"{DATA_TARGET}_train.h5", 
+        'gender',
+        'M',
+        limit=args.limit)
+    val_dataset = HDF5Dataset(DATA_PATH / f"{DATA_TARGET}_val.h5",
+        'gender',
+        'M',
+        limit=args.limit)
+
+if TASK == "age":
     train_dataset = HDF5Dataset(DATA_PATH / f"{DATA_TARGET}_train.h5",
         'ecg_age',
         limit=args.limit,
@@ -62,7 +74,15 @@ CHANNELS = train_dataset[0][0].shape[0]
 SAMPLES = train_dataset[0][0].shape[1]
 (CHANNELS, SAMPLES)
 
-model = MayoModel(CHANNELS, SAMPLES, 5120, 1).to(device)
+if ARCH == "resnet":
+    model = ResNet1d(
+        input_dim = (CHANNELS, SAMPLES),
+        blocks_dim = list(zip(specfile["model"]["net_filter_sizes"], specfile["model"]["net_sequence_lengths"])),
+        n_classes = 1,
+        kernel_size = 17,
+        dropout_rate = 0.8).to(device)
+elif ARCH == "cnn":
+    model = MayoModel(CHANNELS, SAMPLES, 5120, 1).to(device)
 torchinfo.summary(model, input_size=(128, CHANNELS, SAMPLES))
 
 learning_rate = 1e-3
@@ -74,14 +94,14 @@ def output_transform_logit(output):
     y_pred = torch.sigmoid(y_pred)
     return y_pred, y
 
-if args.task == "gender":
+if TASK == "gender":
     criterion = nn.BCEWithLogitsLoss()
     val_metrics = {
         "loss": Loss(criterion),    
         "auc": ROC_AUC(output_transform_logit),
     }
 
-if args.task == "age":
+if TASK == "age":
     criterion = nn.MSELoss()
     val_metrics = {
         "loss": Loss(criterion),    
@@ -96,34 +116,32 @@ if not save_path.exists():
     save_path.parent.mkdir(parents=True, exist_ok=True)
 
 trainer = create_supervised_trainer(model, optimizer, criterion, device)
-
 train_evaluator = create_supervised_evaluator(model, metrics=val_metrics, device=device)
 val_evaluator = create_supervised_evaluator(model, metrics=val_metrics, device=device)
-
-log_interval = 500
-@trainer.on(Events.ITERATION_COMPLETED(every=log_interval))
-def log_training_loss(engine):
-    print(f"Epoch[{engine.state.epoch}], Iter[{engine.state.iteration}] Loss: {engine.state.output:.2f}")
     
 @trainer.on(Events.EPOCH_COMPLETED)
 def log_training_results(trainer):
     train_evaluator.run(train_dataloader)
     metrics = train_evaluator.state.metrics
-    print(f"Training Results - Epoch[{trainer.state.epoch}]")
-    print(metrics)
+    print(f"Training Results - Epoch[{trainer.state.epoch}]: {metrics}")
 
 @trainer.on(Events.EPOCH_COMPLETED)
 def log_validation_results(trainer):
     val_evaluator.run(val_dataloader)
     metrics = val_evaluator.state.metrics
-    print(f"Validation Results - Epoch[{trainer.state.epoch}]")
-    print(metrics)
+    print(f"Validation Results - Epoch[{trainer.state.epoch}]: {metrics}")
     
 model_checkpoint = ModelCheckpoint(save_path, 'checkpoint', n_saved=2, create_dir=True, require_empty=False)
 val_evaluator.add_event_handler(Events.COMPLETED, model_checkpoint, {"model": model})
 
 scheduler = ReduceLROnPlateauScheduler(optimizer, metric_name="loss", patience=5, trainer=trainer)
 val_evaluator.add_event_handler(Events.COMPLETED, scheduler)
+
+RunningAverage(output_transform=lambda x: x).attach(trainer, 'loss')
+
+pbar = ProgressBar()
+pbar.attach(trainer, ['loss'])
+
 
 trainer.add_event_handler(Events.ITERATION_COMPLETED, TerminateOnNan())
 state = trainer.run(train_dataloader, max_epochs=50)
