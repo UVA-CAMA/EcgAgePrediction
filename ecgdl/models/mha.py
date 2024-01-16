@@ -60,7 +60,7 @@ class MultiHeadAttention(nn.Module):
         self.rb_3 = SimpleResidualBlock(downsample=True)
         self.rb_4 = SimpleResidualBlock(downsample=True)
 
-        self.mha = nn.MultiheadAttention(256,8)
+        self.mha = nn.MultiheadAttention(256,8, batch_first=True)
         self.pool = nn.AdaptiveMaxPool1d(output_size=1)
 
         self.fc_1 = nn.Linear(256,nOUT)
@@ -78,9 +78,9 @@ class MultiHeadAttention(nn.Module):
 
         x = F.dropout(x,p=0.5,training=self.training)
 
-        x = x.squeeze(2).permute(2,0,1)
+        x = x.squeeze(2).permute(0,2,1)
         x,s = self.mha(x,x,x)
-        x = x.permute(1,2,0)
+        x = x.permute(0,2,1)
         x = self.pool(x).squeeze(2)
         x = self.fc_1(x)
         

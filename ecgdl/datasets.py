@@ -6,7 +6,7 @@ from tqdm import tqdm
 
 
 class HDF5Dataset(Dataset):
-    def __init__(self, hdf5_path:str, output_key:str=None, reference_level:str=None, limit:int=None, filter_func=None):
+    def __init__(self, hdf5_path:str, output_key:str=None, reference_level:str=None, limit:int=None, filter_func:callable=None, transforms:[str]=None):
         """
         Create a dataset from an HDF5 file.
 
@@ -29,13 +29,17 @@ class HDF5Dataset(Dataset):
         filter_func : callable, optional
             If specified, only use data points where filter_func(label) is true.
 
-        
+        transforms : [str], optional
+            List of transforms to apply to the data. Valid transforms are:
+            "random_lead" - randomly select a lead from the available leads
+            "random_noise" - add random noise to the data
         """
 
         self.hdf5_path = hdf5_path
         self.output_key = output_key
         self.reference_level = reference_level
         self.filter_func = filter_func
+        self.transforms = transforms
 
         self._hdf_handle = h5py.File(self.hdf5_path, "r")
         self._keys = []
@@ -62,7 +66,7 @@ class HDF5Dataset(Dataset):
     def __getitem__(self, idx):
         record = self._hdf_handle[self._keys[idx]]
 
-        dat = record["ecg"][()]
+        dat = record["ecg"][()].T
         if self.output_key is not None:
             if self.reference_level is not None:
                 label = (
@@ -73,4 +77,12 @@ class HDF5Dataset(Dataset):
         else:
             label = None
 
-        return torch.tensor(dat, dtype=torch.float32).T, torch.tensor([label], dtype=torch.float32)
+        if self.transforms is not None:
+            for t in self.transforms:
+                if t == "random_lead":
+                    lead = np.random.randint(0, dat.shape[0])
+                    dat = dat[lead:lead+1, :]
+                elif t == "random_noise":
+                    dat = dat + np.random.normal(0, 0.1, dat.shape)
+
+        return torch.tensor(dat, dtype=torch.float32), torch.tensor([label], dtype=torch.float32)
