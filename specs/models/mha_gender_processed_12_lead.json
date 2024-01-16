@@ -1,6 +1,6 @@
 {
-    "task": "age",
-    "arch": "cnn",
+    "task": "gender",
+    "arch": "mha",
     "data": "processed_12_lead",
     "model": {
         "pad": 2560

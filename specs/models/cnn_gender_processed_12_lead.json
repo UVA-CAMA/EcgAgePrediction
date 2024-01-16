@@ -1,5 +1,5 @@
 {
-    "task": "age",
+    "task": "gender",
     "arch": "cnn",
     "data": "processed_12_lead",
     "model": {
