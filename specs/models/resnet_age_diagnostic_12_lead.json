@@ -5,5 +5,7 @@
     "model": {
         "net_filter_sizes": [64, 128, 196, 256, 320],
         "net_sequence_lengths": [2048, 1024, 256, 64, 16]
-    }
+    },
+    "lr": 0.0001,
+    "epochs": 50
 }

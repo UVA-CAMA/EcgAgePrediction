@@ -11,7 +11,7 @@ import torchinfo
 
 from ignite.engine import Events, create_supervised_trainer, create_supervised_evaluator
 from ignite.metrics import Loss, MeanAbsoluteError, RunningAverage
-from ignite.handlers import ModelCheckpoint, TerminateOnNan, ReduceLROnPlateauScheduler
+from ignite.handlers import ModelCheckpoint, Checkpoint, TerminateOnNan, ReduceLROnPlateauScheduler
 from ignite.contrib.handlers.tqdm_logger import ProgressBar
 from ignite.contrib.metrics import ROC_AUC
 
@@ -116,13 +116,23 @@ if TASK == "age":
 optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
 model_label = uuid.uuid1()
-save_path = MODEL_PATH / f"{model_label}"
+save_path = MODEL_PATH / f"{model_label}/"
 print(f"Saving model to {save_path}")
 if not save_path.exists():
-    save_path.parent.mkdir(parents=True, exist_ok=True)
+    save_path.mkdir()
 
 with open(save_path / "spec.json", "w") as f:
     json.dump(specfile, f)
+
+with open(save_path / "settings.json", "w") as f:
+    d = {
+        "lr": learning_rate,
+        "epochs": epochs,
+        "limit": args.limit,
+    }
+
+    json.dump(d, f)
+
 
 trainer = create_supervised_trainer(model, optimizer, criterion, device)
 train_evaluator = create_supervised_evaluator(model, metrics=val_metrics, device=device)
@@ -139,8 +149,9 @@ def log_validation_results(trainer):
     val_evaluator.run(val_dataloader)
     metrics = val_evaluator.state.metrics
     print(f"Validation Results - Epoch[{trainer.state.epoch}]: {metrics}")
-    
-model_checkpoint = ModelCheckpoint(save_path, 'checkpoint', n_saved=2, create_dir=True, require_empty=False, score_name="loss")
+
+neg_loss_score = Checkpoint.get_default_score_fn("loss", -1.0)
+model_checkpoint = ModelCheckpoint(save_path, 'checkpoint', n_saved=2, create_dir=True, require_empty=False, score_function=neg_loss_score)
 val_evaluator.add_event_handler(Events.COMPLETED, model_checkpoint, {"model": model})
 
 scheduler = ReduceLROnPlateauScheduler(optimizer, metric_name="loss", patience=5, trainer=trainer)

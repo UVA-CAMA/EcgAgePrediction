@@ -2,7 +2,6 @@
     "task": "gender",
     "arch": "mha",
     "data": "processed_12_lead",
-    "model": {
-        "pad": 2560
-    }
+    "lr": 0.000001,
+    "epochs": 50
 }

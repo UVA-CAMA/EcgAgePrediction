@@ -4,5 +4,7 @@
     "data": "processed_12_lead",
     "model": {
         "pad": 2560
-    }
+    },
+    "lr": 0.0001,
+    "epochs": 50
 }
