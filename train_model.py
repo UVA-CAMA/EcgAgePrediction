@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
-from tqdm import tqdm
-import torch
-from torch import nn
-from torch.utils.data import DataLoader
-from ecgdl.datasets import HDF5Dataset
-import numpy as np
-import torchinfo
-
-from ignite.engine import Engine, Events, create_supervised_trainer, create_supervised_evaluator
-from ignite.metrics import Accuracy, Loss, MeanAbsoluteError, RunningAverage
-from ignite.handlers import ModelCheckpoint, TerminateOnNan, ReduceLROnPlateauScheduler, FastaiLRFinder
-from ignite.contrib.handlers.tqdm_logger import ProgressBar
-from ignite.contrib.metrics import ROC_AUC
-
 from pathlib import Path
 import argparse
 import json
+import uuid
 
+import torch
+from torch import nn
+from torch.utils.data import DataLoader
+import torchinfo
+
+from ignite.engine import Events, create_supervised_trainer, create_supervised_evaluator
+from ignite.metrics import Loss, MeanAbsoluteError, RunningAverage
+from ignite.handlers import ModelCheckpoint, TerminateOnNan, ReduceLROnPlateauScheduler
+from ignite.contrib.handlers.tqdm_logger import ProgressBar
+from ignite.contrib.metrics import ROC_AUC
+
+
+from ecgdl.datasets import HDF5Dataset
 from ecgdl.models.mayo import MayoModel
 from ecgdl.models.resnet import ResNet1d
 from ecgdl.models.mha import MultiHeadAttention
@@ -90,9 +90,8 @@ elif ARCH == "mha":
 
 torchinfo.summary(model, input_size=(128, CHANNELS, SAMPLES))
 
-learning_rate = 1e-3
-batch_size = 64
-epochs = 5
+learning_rate = specfile.get("lr", 1e-3)
+epochs = specfile.get("epochs", 50)
 
 def output_transform_logit(output):
     y_pred, y = output
@@ -104,6 +103,7 @@ if TASK == "gender":
     val_metrics = {
         "loss": Loss(criterion),    
         "auc": ROC_AUC(output_transform_logit),
+
     }
 
 if TASK == "age":
@@ -115,25 +115,16 @@ if TASK == "age":
 
 optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
-save_path = MODEL_PATH / TASK / f"{ARCH}_{DATA_TARGET}"
+model_label = uuid.uuid1()
+save_path = MODEL_PATH / f"{model_label}"
 print(f"Saving model to {save_path}")
 if not save_path.exists():
     save_path.parent.mkdir(parents=True, exist_ok=True)
 
+with open(save_path / "spec.json", "w") as f:
+    json.dump(specfile, f)
+
 trainer = create_supervised_trainer(model, optimizer, criterion, device)
-
-lr_finder = FastaiLRFinder()
-
-# To restore the model's and optimizer's states after running the LR Finder
-to_save = {"model": model, "optimizer": optimizer}
-
-with lr_finder.attach(trainer, to_save, start_lr = 1e-6, end_lr = 1e-1) as trainer_with_lr_finder:
-    trainer_with_lr_finder.run(train_dataloader)
-
-print(f"Learning rate suggestion: {lr_finder.lr_suggestion()}")
-
-lr_finder.apply_suggested_lr(optimizer)
-
 train_evaluator = create_supervised_evaluator(model, metrics=val_metrics, device=device)
 val_evaluator = create_supervised_evaluator(model, metrics=val_metrics, device=device)
     
@@ -149,7 +140,7 @@ def log_validation_results(trainer):
     metrics = val_evaluator.state.metrics
     print(f"Validation Results - Epoch[{trainer.state.epoch}]: {metrics}")
     
-model_checkpoint = ModelCheckpoint(save_path, 'checkpoint', n_saved=2, create_dir=True, require_empty=False)
+model_checkpoint = ModelCheckpoint(save_path, 'checkpoint', n_saved=2, create_dir=True, require_empty=False, score_name="loss")
 val_evaluator.add_event_handler(Events.COMPLETED, model_checkpoint, {"model": model})
 
 scheduler = ReduceLROnPlateauScheduler(optimizer, metric_name="loss", patience=5, trainer=trainer)
@@ -163,11 +154,11 @@ if args.verbose:
     ProgressBar(desc="Validation Evalaution").attach(val_evaluator)
 
 trainer.add_event_handler(Events.ITERATION_COMPLETED, TerminateOnNan())
-state = trainer.run(train_dataloader, max_epochs=50)
+state = trainer.run(train_dataloader, max_epochs=epochs)
 
 print(state.metrics)
 
 torch.save({
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),}, 
-    save_path / "model.pth")
+    save_path / "final_model.pth")
