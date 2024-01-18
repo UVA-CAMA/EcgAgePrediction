@@ -137,18 +137,30 @@ with open(save_path / "settings.json", "w") as f:
 trainer = create_supervised_trainer(model, optimizer, criterion, device)
 train_evaluator = create_supervised_evaluator(model, metrics=val_metrics, device=device)
 val_evaluator = create_supervised_evaluator(model, metrics=val_metrics, device=device)
+
+progress = []
     
 @trainer.on(Events.EPOCH_COMPLETED)
 def log_training_results(trainer):
     train_evaluator.run(train_dataloader)
     metrics = train_evaluator.state.metrics
     print(f"Training Results - Epoch[{trainer.state.epoch}]: {metrics}")
+    progress.append({
+        "epoch": trainer.state.epoch,
+        "metrics": metrics,
+        "type": "train",
+    })
 
 @trainer.on(Events.EPOCH_COMPLETED)
 def log_validation_results(trainer):
     val_evaluator.run(val_dataloader)
     metrics = val_evaluator.state.metrics
     print(f"Validation Results - Epoch[{trainer.state.epoch}]: {metrics}")
+    progress.append({
+        "epoch": trainer.state.epoch,
+        "metrics": metrics,
+        "type": "val",
+    })
 
 neg_loss_score = Checkpoint.get_default_score_fn("loss", -1.0)
 model_checkpoint = ModelCheckpoint(save_path, 'checkpoint', n_saved=2, create_dir=True, require_empty=False, score_function=neg_loss_score)
@@ -168,6 +180,9 @@ trainer.add_event_handler(Events.ITERATION_COMPLETED, TerminateOnNan())
 state = trainer.run(train_dataloader, max_epochs=epochs)
 
 print(state.metrics)
+
+with open(save_path / "progress.json", "w") as f:
+    json.dump(progress, f)
 
 torch.save({
             'model_state_dict': model.state_dict(),
