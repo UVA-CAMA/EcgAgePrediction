@@ -3,6 +3,7 @@ from pathlib import Path
 import argparse
 import json
 import uuid
+from copy import deepcopy
 
 import torch
 from torch import nn
@@ -20,6 +21,18 @@ from ecgdl.datasets import HDF5Dataset
 from ecgdl.models.mayo import MayoModel
 from ecgdl.models.resnet import ResNet1d
 from ecgdl.models.mha import MultiHeadAttention
+
+def saveRecord(file, record):
+    if file.exists():
+        with open(file, "r") as fh:
+            dat = json.load(fh)
+    else:
+        dat = []
+        
+    dat.append(record)
+    
+    with open(file, "w") as fh:
+        json.dump(dat, fh)
 
 device = (
     "cuda"
@@ -133,34 +146,35 @@ with open(save_path / "settings.json", "w") as f:
 
     json.dump(d, f)
 
+metrics_output = save_path / "progress.json"
 
 trainer = create_supervised_trainer(model, optimizer, criterion, device)
 train_evaluator = create_supervised_evaluator(model, metrics=val_metrics, device=device)
 val_evaluator = create_supervised_evaluator(model, metrics=val_metrics, device=device)
-
-progress = []
     
 @trainer.on(Events.EPOCH_COMPLETED)
 def log_training_results(trainer):
     train_evaluator.run(train_dataloader)
     metrics = train_evaluator.state.metrics
     print(f"Training Results - Epoch[{trainer.state.epoch}]: {metrics}")
-    progress.append({
+    rec = {
         "epoch": trainer.state.epoch,
         "metrics": metrics,
         "type": "train",
-    })
+    }
+    saveRecord(metrics_output, rec)
 
 @trainer.on(Events.EPOCH_COMPLETED)
 def log_validation_results(trainer):
     val_evaluator.run(val_dataloader)
     metrics = val_evaluator.state.metrics
     print(f"Validation Results - Epoch[{trainer.state.epoch}]: {metrics}")
-    progress.append({
+    rec = {
         "epoch": trainer.state.epoch,
         "metrics": metrics,
         "type": "val",
-    })
+    }
+    saveRecord(metrics_output, rec)
 
 neg_loss_score = Checkpoint.get_default_score_fn("loss", -1.0)
 model_checkpoint = ModelCheckpoint(save_path, 'checkpoint', n_saved=2, create_dir=True, require_empty=False, score_function=neg_loss_score)
@@ -178,11 +192,6 @@ if args.verbose:
 
 trainer.add_event_handler(Events.ITERATION_COMPLETED, TerminateOnNan())
 state = trainer.run(train_dataloader, max_epochs=epochs)
-
-print(state.metrics)
-
-with open(save_path / "progress.json", "w") as f:
-    json.dump(progress, f)
 
 torch.save({
             'model_state_dict': model.state_dict(),
