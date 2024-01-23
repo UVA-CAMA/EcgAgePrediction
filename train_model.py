@@ -21,6 +21,7 @@ from ecgdl.datasets import HDF5Dataset
 from ecgdl.models.mayo import MayoModel
 from ecgdl.models.resnet import ResNet1d
 from ecgdl.models.mha import MultiHeadAttention
+from ecgdl.models.resnetmha import ResNetMHA
 
 def saveRecord(file, record):
     if file.exists():
@@ -60,7 +61,7 @@ ARCH = specfile.get("arch")
 DATA_TARGET = specfile.get("data")
 
 assert(TASK in ['gender','age'])
-assert(ARCH in ['resnet','cnn', 'mha'])
+assert(ARCH in ['resnet','cnn', 'mha', 'resnetmha'])
 
 if TASK == "gender":
     train_dataset = HDF5Dataset(DATA_PATH / f"{DATA_TARGET}_train.h5", 
@@ -100,6 +101,14 @@ elif ARCH == "cnn":
     model = MayoModel(CHANNELS, SAMPLES, 5120, 1).to(device)
 elif ARCH == "mha":
     model = MultiHeadAttention(1).to(device)
+elif ARCH == "resnetmha":
+        model = ResNetMHA(
+            input_dim = (CHANNELS, SAMPLES),
+            blocks_dim = list(zip(specfile["model"]["net_filter_sizes"], specfile["model"]["net_sequence_lengths"])),
+            n_classes = 1,
+            kernel_size = 17,
+            dropout_rate = 0.3,
+            n_heads = 4).to(device)
 
 torchinfo.summary(model, input_size=(128, CHANNELS, SAMPLES))
 
