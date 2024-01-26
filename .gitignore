@@ -3,6 +3,8 @@ env
 .Rproj.user
 *.png
 *.h5
+*.csv
+experiments/*
 
 .Rhistory
 **/.DS_Store
