@@ -1,0 +1,11 @@
+{
+    "task": "gender",
+    "arch": "resnetmha",
+    "data": "processed_12_lead",
+    "lr": 0.00003,
+    "epochs": 50,
+    "model": {
+        "net_filter_sizes": [128, 196, 256, 320],
+        "net_sequence_lengths": [1024, 256, 64, 16]
+    }
+}
