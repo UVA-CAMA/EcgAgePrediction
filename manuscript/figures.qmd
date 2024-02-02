@@ -1,0 +1,250 @@
+---
+title: "Figures"
+format: html
+---
+
+```{r}
+#| message: false
+library(tidyverse)
+library(patchwork)
+library(yardstick)
+library(gt)
+library(gtExtras)
+
+models <- read_csv("../data/models.csv", show_col_types = FALSE)
+metrics <- read_csv("../data/metrics.csv", show_col_types = FALSE)
+```
+
+```{r}
+metrics %>%
+  left_join(models, by = "model") %>%
+  filter(set == "val") %>%
+  group_by(task, metric) %>%
+  slice_max(value)
+```
+
+
+```{r}
+fig_data <-  metrics %>%
+  left_join(models, by = "model") %>%
+  filter(metric == "loss") %>%
+  mutate(arch = as_factor(arch))
+
+base_theme <- theme_bw(base_size = 14) + theme(legend.text = element_text(size = 10))
+
+scale_lines <- scale_linetype_manual(
+  values = c("train" = "dashed", "val" = "solid"),
+  labels = c("train" = "Training", "val" = "Validation")) 
+
+scale_colors <- scale_color_manual(
+  values = c("cnn" = "#a6cee3", "resnet" = "#1f78b4", "mha" = "#b2df8a", "resnetmha" = "#33a02c"),
+  labels = c("cnn" = "CNN", "resnet" = "ResNet", "mha" = "MHA", "resnetmha" = "ResNet+MHA"))
+
+p1 <- fig_data %>%
+  filter(task == "age") %>%
+  ggplot(aes(x = epoch, y = value, color = arch, linetype = set)) + 
+    geom_line() +
+    coord_cartesian(ylim = c(0, 300), expand = FALSE) +
+    scale_lines + 
+    scale_colors +
+    labs(y = "Loss (MSE)", x = "Epoch", linetype = "Data Set", color = "Model", subtitle = "Age") +
+    # guides(color = guide_none(), linetype = guide_none()) + 
+    base_theme 
+
+p2 <- fig_data %>%
+  filter(task == "gender") %>%
+  ggplot(aes(x = epoch, y = value, color = arch, linetype = set)) + 
+    geom_line() +
+    coord_cartesian(ylim = c(0, 0.5), expand = FALSE) +
+    scale_lines + 
+    scale_colors +
+    labs(y= "Loss (BCE)", x = "Epoch", linetype = "Data Set", color = "Model", subtitle = "Sex") +
+    base_theme
+
+fig <- p1 + p2 + plot_layout(ncol = 1, guides = "collect") 
+
+ggsave("figure1.pdf", fig)
+fig
+```
+
+
+```{r}
+ingest_file <- function(x) {
+  read_csv(x,
+           col_types = cols(
+             records = col_double(),
+             y_pred = col_double(),
+             y = col_double()
+           ))
+}
+
+all_results <- fs::dir_ls("../data/results/", recurse = 1, glob = "*.csv") %>%
+  set_names() %>%
+  map(ingest_file) %>%
+  bind_rows(.id = "input_file") %>%
+  separate_wider_delim(input_file, "/", names = c(NA,NA,NA, "model", "set")) %>%
+  mutate(set = str_remove(set, ".csv") %>% str_remove("scores_"))
+```
+
+```{r}
+highlight_max <- function(x) {
+  ranks <- rank(round(x, digits = 5))
+  scales::col_factor(c("#FFFFFF", "#3182BD"), c(TRUE, FALSE))(ranks == max(ranks))
+}
+
+highlight_min <- function(x) {
+  ranks <- rank(round(x, digits = 4))
+  scales::col_factor(c("#FFFFFF", "#3182BD"), c(TRUE, FALSE))(ranks == min(ranks))
+}
+
+age_models <- models %>%
+  filter(task == "age") %>%
+  pull(model)
+
+tbl <- all_results %>%
+  filter(model %in% age_models) %>%
+  group_by(model, set) %>%
+  summarise(
+    mae = mae_vec(y, y_pred),
+    mse = (y - y_pred)^2 %>% mean(),
+    rsq = rsq_trad_vec(y, y_pred),
+    .groups = "drop"
+  ) %>%
+  left_join(models %>% select(model, arch), by = "model") %>%
+  select(arch, set, everything(), -model) %>%
+  pivot_longer(c(-arch, -set)) %>%
+  mutate(name = str_to_upper(name), set = str_to_title(set)) %>%
+  mutate(name = str_c(name, "_", set)) %>%
+  select(-set) %>%
+  pivot_wider(id_cols = arch) %>%
+  mutate(arch = case_match(arch, 
+                           "cnn" ~ "CNN", 
+                           "resnet" ~ "ResNet", 
+                           "mha" ~ "MHA", 
+                           "resnetmha" ~ "ResNet+MHA")
+  ) %>%
+  select(arch, starts_with("mae"), starts_with("mse"), starts_with("rsq")) %>%
+  gt() %>%
+  fmt_number(-arch,  decimals = 2) %>%
+  tab_spanner_delim(delim = "_") %>%
+  data_color(columns = starts_with("mae"), fn = highlight_min) %>%
+  data_color(columns = starts_with("mse"), fn = highlight_min) %>%
+  data_color(columns = starts_with("rsq"), fn = highlight_max) %>%
+  cols_label(arch = "Model")
+
+
+gtsave(tbl, "table1.html")
+tbl
+```
+
+```{r}
+sex_models <- models %>%
+  filter(task == "gender") %>%
+  pull(model)
+
+thresholds <- all_results %>%
+  filter(set == "val", model %in% sex_models) %>%
+    mutate(y_pred = plogis(y_pred), 
+         y = as_factor(y) %>% fct_relevel(c("1", "0"))) %>%
+  group_by(model) %>%
+  roc_curve(y, y_pred) %>%
+  mutate(j_index = sensitivity + specificity - 1) %>%
+  slice_max(j_index) %>%
+  select(model, .threshold)
+
+tbl <- all_results %>%
+  filter(model %in% sex_models) %>%
+  mutate(y_pred = plogis(y_pred),
+        y = as_factor(y) %>% fct_relevel(c("1", "0"))) %>%
+  left_join(thresholds, by = "model") %>%
+  mutate(
+    y_pred_fact = ((y_pred > .threshold) * 1.0 ) %>% as_factor() %>% fct_relevel(c("1", "0"))
+  ) %>%
+  group_by(model, set) %>%
+  summarise(
+    AUROC = roc_auc_vec(y, y_pred),
+    Brier = brier_class_vec(y, y_pred),
+    ACC = accuracy_vec(y, y_pred_fact),
+    F1 = f_meas_vec(y, y_pred_fact),
+    Sens = sensitivity_vec(y, y_pred_fact),
+    Spec = specificity_vec(y, y_pred_fact),
+    .groups = "drop") %>%
+  left_join(models %>% select(model, arch), by = "model") %>%
+  select(arch, set, everything(), -model) %>%
+  pivot_longer(c(-arch, -set)) %>%
+  mutate(set = str_to_title(set)) %>%
+  mutate(name = str_c(name, "_", set)) %>%
+  select(-set) %>%
+  pivot_wider(id_cols = arch, names_sort = TRUE) %>%
+  mutate(arch = case_match(arch,
+                           "cnn" ~ "CNN",
+                           "resnet" ~ "ResNet",
+                           "mha" ~ "MHA",
+                           "resnetmha" ~ "ResNet+MHA")
+  ) %>%
+   gt() %>%
+   fmt_number(-arch,  decimals = 3) %>%
+   tab_spanner_delim(delim = "_") %>%
+    data_color(columns = starts_with(c("acc", "auroc", "f1", "sens", "spec")),
+               colors = highlight_max) %>%
+  data_color(columns = starts_with("brier"), fn = highlight_min) %>%
+  cols_label(arch = "Model")
+
+gtsave(tbl, "table2.html")
+tbl
+```
+
+
+
+```{r}
+sex_models <- models %>%
+  filter(task == "gender") %>%
+  pull(model)
+
+tbl <- all_results %>%
+  filter(model %in% sex_models) %>%
+  mutate(y_pred = plogis(y_pred), 
+         y = as_factor(y) %>% fct_relevel(c("1", "0")),
+         y_pred_fact = ((y_pred > 0.5) * 1.0 ) %>% as_factor() %>% fct_relevel(c("1", "0"))
+  ) %>%
+  group_by(model, set) %>%
+  summarise(
+    AUROC = roc_auc_vec(y, y_pred),
+    Brier = brier_class_vec(y, y_pred),
+    ACC = accuracy_vec(y, y_pred_fact),
+    F1 = f_meas_vec(y, y_pred_fact),
+    Sens = sensitivity_vec(y, y_pred_fact),
+    Spec = specificity_vec(y, y_pred_fact),
+    .groups = "drop") %>%
+  left_join(models %>% select(model, arch), by = "model") %>%
+  select(arch, set, everything(), -model) %>%
+  pivot_longer(c(-arch, -set)) %>%
+  mutate(set = str_to_title(set)) %>%
+  mutate(name = str_c(name, "_", set)) %>%
+  select(-set) %>%
+  pivot_wider(id_cols = arch, names_sort = TRUE) %>%
+  mutate(arch = case_match(arch,
+                           "cnn" ~ "CNN",
+                           "resnet" ~ "ResNet",
+                           "mha" ~ "MHA",
+                           "resnetmha" ~ "ResNet+MHA")
+  ) %>%
+   gt() %>%
+   fmt_number(-arch,  decimals = 3) %>%
+   tab_spanner_delim(delim = "_") %>%
+    data_color(columns = starts_with(c("acc", "auroc", "f1", "sens", "spec")),
+               colors = highlight_max) %>%
+  data_color(columns = starts_with("brier"), fn = highlight_min) %>%
+  cols_label(arch = "Model")
+
+gtsave(tbl, "table2b.html")
+tbl
+```
+
+
+
+
+
+
+
+
