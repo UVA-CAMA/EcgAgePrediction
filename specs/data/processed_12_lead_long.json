@@ -1,0 +1,9 @@
+{
+    "fs": 500,
+    "sig_len": 4096,
+    "leads": ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"],
+    "remove_powerline": true,
+    "remove_baseline": true,
+    "center_and_scale": "mean_median_abs",
+    "lowpass": 40
+}
