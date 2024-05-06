@@ -8,5 +8,5 @@
 #SBATCH --output output/slurm-%j.out
 #SBATCH --gres=gpu:1 
 
-source env/bin/activate
+source .venv/bin/activate
 ./score_model.py $@

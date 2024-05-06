@@ -6,5 +6,5 @@
 #SBATCH --partition=standard
 #SBATCH --output output/slurm-%j.out
 
-source env/bin/activate
+source .venv/bin/activate
 ./create_dataset.py $@
