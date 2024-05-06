@@ -3,7 +3,6 @@ from pathlib import Path
 import argparse
 import json
 import uuid
-from copy import deepcopy
 
 import torch
 from torch import nn
