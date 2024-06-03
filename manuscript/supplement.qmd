@@ -1,0 +1,161 @@
+---
+title: "Supplement"
+format: html
+---
+
+```{r}
+#| message: false
+library(tidyverse)
+library(gt)
+library(gtExtras)
+library(ggforce)
+```
+
+```{r}
+val_records <- read_lines("../data/mimic/RECORDS_val.txt") %>%
+  str_extract("/(\\d+)$", group = 1)
+
+test_records <- read_lines("../data/mimic/RECORDS_test.txt") %>%
+  str_extract("/(\\d+)$", group = 1)
+
+train_records <- read_lines("../data/mimic/RECORDS_train.txt") %>%
+  str_extract("/(\\d+)$", group = 1)
+
+cohort_data <- read_csv(
+  "../data/mimic/derived_ecg_annotations.csv",
+  col_types = cols(
+    study_id = col_double(),
+    gender = col_character(),
+    ecg_age = col_double()
+  )
+) %>%
+  mutate(
+    test = study_id %in% test_records,
+    val = study_id %in% val_records,
+    train = study_id %in% train_records,
+    group_label = case_when(
+      test ~ "Test",
+      val ~ "Validation",
+      TRUE ~ "Train")
+  )
+```
+
+```{r}
+cohort_data %>%
+  count(group_label)
+```
+
+
+```{r}
+cohort_data %>%
+  filter(!is.na(gender)) %>%
+  count(gender) %>%
+  mutate(pct = n / sum(n)) %>%
+  gt() %>%
+  fmt_percent(columns = pct, decimals = 1)
+```
+
+
+```{r}
+
+cohort_data %>%
+  group_by(group_label) %>%
+  filter(!is.na(gender)) %>%
+  count(gender) %>%
+  mutate(pct = n / sum(n)) %>%
+    gt() %>%
+  fmt_percent(columns = pct, decimals = 1)
+```
+
+
+```{r}
+cohort_data %>%
+  group_by(group_label) %>%
+  filter(!is.na(ecg_age)) %>%
+  summarise(
+    mean_age = mean(ecg_age),
+    sd_age = sd(ecg_age),
+    p25 = quantile(ecg_age, 0.25),
+    median = quantile(ecg_age, 0.5),
+    p75 = quantile(ecg_age, 0.75)
+  ) %>%
+  gt()
+```
+
+```{r}
+fig <- cohort_data %>%
+  filter(!is.na(ecg_age), ecg_age < 90, ecg_age >= 18) %>%
+  ggplot(aes(x = ecg_age, fill = group_label)) +
+  geom_histogram(alpha = 0.5, binwidth = 1) + 
+  coord_cartesian(expand = FALSE) + 
+  theme_bw(base_size = 14) +
+  labs(y = "Count", x = "Age, years", title = "Distribution of Ages by Data Set", fill = "Data Set")
+
+ggsave("eFigure1.pdf", fig, width = 10, height = 8)
+fig
+```
+
+```{r}
+models <- read_csv("../data/models.csv", show_col_types = FALSE)
+metrics <- read_csv("../data/metrics.csv", show_col_types = FALSE)
+
+initial_models <- models %>% filter(mtime < '2024-04-01')
+validation_models <- models %>% filter(mtime >= '2024-04-01')
+```
+
+```{r}
+avg_data <- metrics %>%
+  inner_join(filter(validation_models, data == "processed_12_lead"), by = "model") %>%
+  filter(metric == "loss") %>%
+  group_by(set, epoch) %>%
+  summarise(value = mean(value))
+  
+fig <- metrics %>%
+  inner_join(filter(validation_models, data == "processed_12_lead"), by = "model") %>%
+  filter(metric == "loss") %>%
+  ggplot(aes(x = epoch, y = value, color = model, linetype = set)) +
+    geom_line() +
+    geom_line(data=avg_data, aes(color = NULL, linetype = NULL, group = set), alpha = 0.5, linewidth = 1) + 
+    scale_color_discrete(guide=NULL) + 
+    theme_bw(base_size = 14) +
+    facet_zoom(ylim=c(85, 120)) + 
+    labs(x = "Epoch", y = "Loss", title = "Loss by Replicate", linetype = "Subset")
+
+ggsave("eFigure2.pdf", fig, width = 10, height = 8)
+fig
+```
+
+```{r}
+target_models <- 
+  models %>%
+  filter(arch == "cnn", task == "age") %>%
+  arrange(mtime) %>%
+  group_by(data) %>%
+  slice_head(n = 1)
+
+fig <- metrics %>%
+  inner_join(target_models, by = "model") %>%
+  filter(metric == "loss") %>%
+  mutate(
+    data = case_match(data,
+      "processed_12_lead" ~ "40/240",
+      "processed_12_lead_long" ~ "40/500",
+      "intermediate_12_lead_short" ~ "80/240",
+      "intermediate_12_lead_long" ~ "80/500",
+      .default = data
+    ),
+    set = case_match(set,
+      "train" ~ "Train",
+      "val" ~ "Validation",
+      .default = set
+    )                 
+  ) %>%
+  ggplot(aes(x = epoch, y= value, color = data, linetype = set)) +
+    geom_line() +
+    facet_zoom(ylim=c(90,130)) + 
+    labs(x = "Epoch", y= "Loss", title = "Loss by Data Set", color ="Data Set", linetype = "Subset") +
+    theme_bw(base_size = 14)
+
+ggsave("eFigure3.pdf", fig, width = 10, height = 8)
+```
+

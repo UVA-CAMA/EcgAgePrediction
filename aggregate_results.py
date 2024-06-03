@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import pandas as pd
 from copy import deepcopy
+from datetime import datetime
 
 parser = argparse.ArgumentParser()
 parser.add_argument("models", type=str, nargs="+")
@@ -18,15 +19,18 @@ for model in args.models:
     with open(MODEL_DIR / "spec.json", "r") as f:
         config = json.load(f)
 
+    progress = MODEL_DIR / "progress.json"
+
     models.append({
         "model": MODEL_DIR.name,
         "task": config["task"],
         "arch": config["arch"],
         "data": config["data"],
+        "mtime": datetime.fromtimestamp(progress.stat().st_mtime).isoformat(),
     })
 
     
-    with open(MODEL_DIR / "progress.json", "r") as f:
+    with open(progress, "r") as f:
         results = json.load(f)
 
     for entry in results:
